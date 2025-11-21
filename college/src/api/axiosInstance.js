@@ -1,7 +1,7 @@
 // axiosInstance.js
 import axios from 'axios';
 
-const API_URL = "https://college-backend-beta.vercel.app/api";
+const API_URL = "https://college-backend-ten.vercel.app/api";
 
 const axiosInstance = axios.create({
   baseURL: API_URL,
