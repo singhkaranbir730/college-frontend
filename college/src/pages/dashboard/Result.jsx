@@ -1,0 +1,660 @@
+import React, { useState, useEffect } from "react";
+import { useForm, useFieldArray } from "react-hook-form";
+import axiosInstance from "../../api/axiosInstance";
+import { toast } from "react-toastify";
+
+const Result = () => {
+  const user = JSON.parse(localStorage.getItem("user"));
+  const role = user?.role;
+  
+  const { register, handleSubmit, reset, control, watch, setValue } = useForm({
+    defaultValues: {
+      studentInfo: {
+        fullName: "",
+        rollNumber: "",
+        course: "",
+        periodType: "semester",
+        period: "",
+        session: ""
+      },
+      subjects: [],
+      status: "",
+    },
+  });
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "subjects",
+  });
+
+  const [searchRoll, setSearchRoll] = useState("");
+  const [searchPeriod, setSearchPeriod] = useState("");
+  const [searchSession, setSearchSession] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentRollNumber, setCurrentRollNumber] = useState("");
+  const [currentPeriod, setCurrentPeriod] = useState("");
+  const [currentSession, setCurrentSession] = useState("");
+
+  // Watch form values for real-time display
+  const watchedValues = watch();
+  const periodType = watch("studentInfo.periodType");
+
+  // Auto-load student's result if they're a student
+  useEffect(() => {
+    if (role === "student" && user?.rollNumber) {
+      handleSearch(user.rollNumber);
+    }
+  }, [role, user?.rollNumber]);
+
+  // API call to fetch result by roll number with optional filters
+  const fetchResultByRoll = async (rollNumber, period = "", session = "") => {
+    try {
+      let url = `/result/student/${rollNumber}`;
+      const params = new URLSearchParams();
+      
+      if (period) params.append('period', period);
+      if (session) params.append('session', session);
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      const response = await axiosInstance.get(url);
+      if (response.data?.success) {
+        toast.success("Result found successfully! ✅");
+      } else {
+        toast.info("No existing result found. You can create a new one. ✍️");
+      }
+      return response.data;
+    } catch (error) {
+      toast.error("An error occurred while fetching the result. 😞");
+      throw error.response?.data || { message: 'Failed to fetch result' };
+    }
+  };
+
+  // API call to create new result
+  const createResult = async (resultData) => {
+    try {
+      const response = await axiosInstance.post('/result', resultData);
+      if (response.data?.success) {
+        toast.success("Result created successfully! ✨");
+      }
+      return response.data;
+    } catch (error) {
+      toast.error("Failed to create result. 😞");
+      throw error.response?.data || { message: 'Failed to create result' };
+    }
+  };
+
+  // API call to update existing result
+  const updateResult = async (rollNumber, period, session, resultData) => {
+    try {
+      let url = `/result/${rollNumber}`;
+      const params = new URLSearchParams();
+      
+      if (period) params.append('period', period);
+      if (session) params.append('session', session);
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      const response = await axiosInstance.put(url, resultData);
+      if (response.data?.success) {
+        toast.success("Result updated successfully! ✅");
+      }
+      return response.data;
+    } catch (error) {
+      toast.error("Failed to update result. 😟");
+      throw error.response?.data || { message: 'Failed to update result' };
+    }
+  };
+
+  const handleSearch = async (rollNumber = searchRoll, period = searchPeriod, session = searchSession) => {
+    if (!rollNumber.trim()) {
+      setError("Please enter a roll number");
+      return;
+    }
+
+    setError("");
+    setLoading(true);
+    
+    try {
+      const response = await fetchResultByRoll(
+        rollNumber.trim().toUpperCase(),
+        period.trim(),
+        session.trim()
+      );
+      
+      if (response.success && response.data) {
+        // Result found - populate form for editing
+        reset(response.data);
+        setIsEditing(true);
+        setCurrentRollNumber(response.data.studentInfo.rollNumber);
+        setCurrentPeriod(response.data.studentInfo.period);
+        setCurrentSession(response.data.studentInfo.session);
+        
+        if (role === "admin") {
+          setSearchRoll(response.data.studentInfo.rollNumber);
+          setSearchPeriod(response.data.studentInfo.period);
+          setSearchSession(response.data.studentInfo.session);
+        }
+      } else {
+        // No result found - initialize empty form for new entry
+        resetToNewEntry(rollNumber.trim().toUpperCase(), period.trim(), session.trim());
+      }
+    } catch (error) {
+      console.error("Search error:", error);
+      setError(error.message || "No result found for given parameters.");
+      resetToNewEntry(rollNumber.trim().toUpperCase(), period.trim(), session.trim());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetToNewEntry = (rollNumber = "", period = "", session = "") => {
+    reset({
+      studentInfo: {
+        fullName: "",
+        rollNumber: rollNumber,
+        course: "",
+        periodType: "semester",
+        period: period,
+        session: session
+      },
+      subjects: [],
+      status: "",
+    });
+    setIsEditing(false);
+    setCurrentRollNumber("");
+    setCurrentPeriod("");
+    setCurrentSession("");
+  };
+
+  const onSubmit = async (data) => {
+    // Validate data before submission
+    if (!data.studentInfo.fullName.trim()) {
+      setError("Full name is required");
+      toast.error("Full name is required.");
+      return;
+    }
+    if (!data.studentInfo.rollNumber.trim()) {
+      setError("Roll number is required");
+      toast.error("Roll number is required.");
+      return;
+    }
+    if (!data.studentInfo.course.trim()) {
+      setError("Course is required");
+      toast.error("Course is required.");
+      return;
+    }
+    if (!data.studentInfo.period.trim()) {
+      setError("Period is required");
+      toast.error("Period (Semester/Year) is required.");
+      return;
+    }
+    if (!data.studentInfo.session.trim()) {
+      setError("Session is required");
+      toast.error("Session is required.");
+      return;
+    }
+    if (!data.subjects || data.subjects.length === 0) {
+      setError("At least one subject is required");
+      toast.error("At least one subject is required.");
+      return;
+    }
+    if (!data.status) {
+      setError("Result status is required");
+      toast.error("Result status is required.");
+      return;
+    }
+
+    // Validate subjects
+    for (let i = 0; i < data.subjects.length; i++) {
+      const subject = data.subjects[i];
+      if (!subject.code.trim() || !subject.name.trim()) {
+        setError(`Subject ${i + 1}: Code and name are required`);
+        toast.error(`Subject ${i + 1}: Code and name are required.`);
+        return;
+      }
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      let response;
+      
+      if (isEditing) {
+        // Update existing result
+        response = await updateResult(
+          currentRollNumber,
+          currentPeriod,
+          currentSession,
+          data
+        );
+      } else {
+        // Create new result
+        response = await createResult(data);
+      }
+
+      if (response.success) {
+        setIsEditing(true);
+        setCurrentRollNumber(data.studentInfo.rollNumber);
+        setCurrentPeriod(data.studentInfo.period);
+        setCurrentSession(data.studentInfo.session);
+        
+        // Refresh the form with updated data
+        if (response.data) {
+          reset(response.data);
+        }
+      } else {
+        setError(response.message || `Failed to ${isEditing ? 'update' : 'save'} result`);
+      }
+    } catch (error) {
+      console.error("Submit error:", error);
+      setError(error.message || `Failed to ${isEditing ? 'update' : 'save'} result`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearForm = () => {
+    resetToNewEntry();
+    setSearchRoll("");
+    setSearchPeriod("");
+    setSearchSession("");
+    setError("");
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSearch();
+    }
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto p-8 bg-blue-50 rounded-xl shadow-sm">
+      <h2 className="text-2xl font-bold mb-6">
+        {role === "admin" ? "Admin - Manage Result" : "Student Result"}
+      </h2>
+
+      {/* Admin Search Box */}
+      {role === "admin" && (
+        <div className="mb-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Roll Number <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., 123AB"
+                value={searchRoll}
+                onChange={(e) => setSearchRoll(e.target.value.toUpperCase())}
+                onKeyPress={handleKeyPress}
+                className="w-full border border-blue-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Period (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., 1 or 1st Year"
+                value={searchPeriod}
+                onChange={(e) => setSearchPeriod(e.target.value)}
+                className="w-full border border-blue-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Session (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., 2024-2025"
+                value={searchSession}
+                onChange={(e) => setSearchSession(e.target.value)}
+                className="w-full border border-blue-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                disabled={loading}
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleSearch()}
+              disabled={loading || !searchRoll.trim()}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? "Searching..." : "Search"}
+            </button>
+            <button
+              type="button"
+              onClick={clearForm}
+              disabled={loading}
+              className="bg-gray-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-600">{error}</p>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-blue-600">Loading...</p>
+        </div>
+      )}
+
+      {/* Status indicator */}
+      {role === "admin" && (
+        <div className="mb-4 p-2 bg-white border border-blue-200 rounded-lg">
+          <p className="text-sm text-gray-600">
+            Status: <span className="font-medium">
+              {isEditing 
+                ? `Editing result for ${currentRollNumber} - ${currentPeriod} (${currentSession})` 
+                : "Creating new result"}
+            </span>
+          </p>
+        </div>
+      )}
+
+      {/* Student/Admin Form */}
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        {/* Student Info */}
+        <div className="grid grid-cols-2 gap-6 bg-white p-4 rounded-lg border border-blue-100">
+          <h3 className="col-span-2 text-lg font-semibold mb-2">Student Information</h3>
+          
+          {/* Full Name */}
+          <div className="flex flex-col">
+            <label className="mb-1 font-medium">Full Name</label>
+            {role === "admin" ? (
+              <input
+                type="text"
+                {...register("studentInfo.fullName", { required: true })}
+                className="border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            ) : (
+              <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+                {watchedValues?.studentInfo?.fullName || "-"}
+              </p>
+            )}
+          </div>
+
+          {/* Roll Number */}
+          <div className="flex flex-col">
+            <label className="mb-1 font-medium">Roll Number</label>
+            {role === "admin" ? (
+              <input
+                type="text"
+                {...register("studentInfo.rollNumber", { required: true })}
+                disabled={isEditing}
+                className={`border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                  isEditing ? 'bg-gray-100 cursor-not-allowed' : ''
+                }`}
+              />
+            ) : (
+              <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+                {watchedValues?.studentInfo?.rollNumber || "-"}
+              </p>
+            )}
+          </div>
+
+          {/* Course */}
+          <div className="flex flex-col">
+            <label className="mb-1 font-medium">Course</label>
+            {role === "admin" ? (
+              <input
+                type="text"
+                {...register("studentInfo.course", { required: true })}
+                className="border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            ) : (
+              <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+                {watchedValues?.studentInfo?.course || "-"}
+              </p>
+            )}
+          </div>
+
+          {/* Period Type */}
+          <div className="flex flex-col">
+            <label className="mb-1 font-medium">Period Type</label>
+            {role === "admin" ? (
+              <select
+                {...register("studentInfo.periodType", { required: true })}
+                disabled={isEditing}
+                className={`border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                  isEditing ? 'bg-gray-100 cursor-not-allowed' : ''
+                }`}
+              >
+                <option value="semester">Semester</option>
+                <option value="year">Year</option>
+              </select>
+            ) : (
+              <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+                {watchedValues?.studentInfo?.periodType === "semester" ? "Semester" : "Year"}
+              </p>
+            )}
+          </div>
+
+          {/* Period */}
+          <div className="flex flex-col">
+            <label className="mb-1 font-medium">
+              {periodType === "semester" ? "Semester" : "Year"}
+            </label>
+            {role === "admin" ? (
+              <input
+                type="text"
+                placeholder={periodType === "semester" ? "e.g., 1, 2, 3..." : "e.g., 1st Year, 2nd Year..."}
+                {...register("studentInfo.period", { required: true })}
+                disabled={isEditing}
+                className={`border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                  isEditing ? 'bg-gray-100 cursor-not-allowed' : ''
+                }`}
+              />
+            ) : (
+              <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+                {watchedValues?.studentInfo?.period || "-"}
+              </p>
+            )}
+          </div>
+
+          {/* Session */}
+          <div className="flex flex-col">
+            <label className="mb-1 font-medium">Session</label>
+            {role === "admin" ? (
+              <input
+                type="text"
+                placeholder="e.g., 2024-2025"
+                {...register("studentInfo.session", { required: true })}
+                disabled={isEditing}
+                className={`border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                  isEditing ? 'bg-gray-100 cursor-not-allowed' : ''
+                }`}
+              />
+            ) : (
+              <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+                {watchedValues?.studentInfo?.session || "-"}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Subjects Table */}
+        <div className="bg-white p-4 rounded-lg border border-blue-100">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg font-semibold">Subjects</h3>
+            {role === "admin" && (
+              <button
+                type="button"
+                onClick={() =>
+                  append({ code: "", name: "", maxMarks: 100, obtainedMarks: 0, grade: "" })
+                }
+                disabled={loading}
+                className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm disabled:opacity-50"
+              >
+                + Add Subject
+              </button>
+            )}
+          </div>
+          
+          {fields.length === 0 ? (
+            <p className="text-gray-500 text-center py-4">
+              {role === "admin" ? "No subjects added yet. Click 'Add Subject' to start." : "No subjects available"}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border border-blue-100 text-left text-sm">
+                <thead className="bg-blue-100">
+                  <tr>
+                    <th className="p-2 border border-blue-200">Code</th>
+                    <th className="p-2 border border-blue-200">Subject</th>
+                    <th className="p-2 border border-blue-200">Max Marks</th>
+                    <th className="p-2 border border-blue-200">Obtained</th>
+                    <th className="p-2 border border-blue-200">Grade</th>
+                    {role === "admin" && <th className="p-2 border border-blue-200">Action</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {fields.map((field, index) => (
+                    <tr key={field.id} className="border border-blue-100">
+                      {["code", "name", "maxMarks", "obtainedMarks", "grade"].map((col) => (
+                        <td key={col} className="p-2 border border-blue-200">
+                          {role === "admin" ? (
+                            col === "grade" ? (
+                              <select
+                                {...register(`subjects.${index}.${col}`)}
+                                className="w-full border border-blue-200 rounded-lg p-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              >
+                                <option value="">Select</option>
+                                <option value="A+">A+</option>
+                                <option value="A">A</option>
+                                <option value="B+">B+</option>
+                                <option value="B">B</option>
+                                <option value="C+">C+</option>
+                                <option value="C">C</option>
+                                <option value="D">D</option>
+                                <option value="F">F</option>
+                              </select>
+                            ) : (
+                              <input
+                                type={col === "maxMarks" || col === "obtainedMarks" ? "number" : "text"}
+                                {...register(`subjects.${index}.${col}`)}
+                                min={col === "maxMarks" || col === "obtainedMarks" ? "0" : undefined}
+                                className="w-full border border-blue-200 rounded-lg p-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            )
+                          ) : (
+                            <p className="px-1">{watchedValues?.subjects?.[index]?.[col] || "-"}</p>
+                          )}
+                        </td>
+                      ))}
+                      {role === "admin" && (
+                        <td className="p-2 border border-blue-200 text-center">
+                          <button
+                            type="button"
+                            onClick={() => remove(index)}
+                            disabled={loading}
+                            className="text-red-600 text-sm hover:text-red-800 disabled:opacity-50"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Result Status */}
+        <div className="bg-white p-4 rounded-lg border border-blue-100">
+          <label className="mb-1 font-medium block">Result Status (Pass/Fail)</label>
+          {role === "admin" ? (
+            <select
+              {...register("status", { required: true })}
+              className="border border-blue-200 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value="">Select Status</option>
+              <option value="Pass">Pass</option>
+              <option value="Fail">Fail</option>
+            </select>
+          ) : (
+            <p className="border border-blue-200 rounded-lg p-2 bg-gray-50">
+              {watchedValues?.status || "-"}
+            </p>
+          )}
+        </div>
+
+        {/* Summary for students */}
+        {role !== "admin" && watchedValues?.subjects?.length > 0 && (
+          <div className="bg-white p-4 rounded-lg border border-blue-100">
+            <h3 className="text-lg font-semibold mb-2">Result Summary</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="font-medium">Total Subjects:</span>
+                <p>{watchedValues.subjects.length}</p>
+              </div>
+              <div>
+                <span className="font-medium">Total Marks:</span>
+                <p>{watchedValues.totalMarks || watchedValues.subjects.reduce((sum, subject) => sum + Number(subject.maxMarks || 0), 0)}</p>
+              </div>
+              <div>
+                <span className="font-medium">Obtained Marks:</span>
+                <p>{watchedValues.obtainedMarks || watchedValues.subjects.reduce((sum, subject) => sum + Number(subject.obtainedMarks || 0), 0)}</p>
+              </div>
+              <div>
+                <span className="font-medium">Percentage:</span>
+                <p>
+                  {watchedValues.percentage || (() => {
+                    const totalMarks = watchedValues.subjects.reduce((sum, subject) => sum + Number(subject.maxMarks || 0), 0);
+                    const obtainedMarks = watchedValues.subjects.reduce((sum, subject) => sum + Number(subject.obtainedMarks || 0), 0);
+                    return totalMarks > 0 ? ((obtainedMarks / totalMarks) * 100).toFixed(2) + "%" : "0%";
+                  })()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {role === "admin" && (
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={clearForm}
+              disabled={loading}
+              className="bg-gray-600 text-white px-6 py-2 rounded-lg disabled:opacity-50"
+            >
+              Clear Form
+            </button>
+            <button
+              type="submit"
+              disabled={loading || fields.length === 0}
+              className="bg-green-600 text-white px-6 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? "Saving..." : (isEditing ? "Update Result" : "Save Result")}
+            </button>
+          </div>
+        )}
+      </form>
+    </div>
+  );
+};
+
+export default Result;
